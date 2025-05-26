@@ -20,8 +20,14 @@ Attach VCC and GND to target (including VPP if it is dedicated pin), plug in qua
 
 1200 Baud (to match firmware writing speed), no parity, single stop bit.
 
-### Extra
+### Operations
 
-Besides writing HEX file to device, the option to read program memory is also provided. Just replace colons (`:`) in your hex-file
+**To write (upload) the HEX-file with firmware**, you simply need to send it to UART. It is good to use some convenient terminal program.
+
+Alternatively simple script `burn.sh` is provided which sets the port on Linux and sends file to it, simultaneously reading debug output from the programmer.
+
+**To erase the chip** send single symbol `!`. Again example file `erase.sh` is provided to perform this action.
+
+**Reading program memory** is also provided (e.g. for verification). Just replace colons (`:`) in your hex-file
 with question marks - and you'll read data instead of writing (data in hex-file themselves are not used, except for addresses in the
-beginning of the lines).
+beginning of the lines). See `readmem.sh` for example of reading first 16 bytes.
