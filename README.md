@@ -1,10 +1,11 @@
-# at89s4051-prog
-ISP programmer for at89s4051 microcontrollers, on Arduino
+# At89s-prog
+ISP programmer for Atmel (now Microchip) 8051 MCU clones - e.g. `At89s2051`, `At89s4051`, `At89s51`, `At89s52` microcontrollers.
 
-Atmel's (Microchip) family of 8051-clones includes AT89S4051 with 4k flash. They allow In-System Programming (enabled by default).
+Only bare Arduino (e.g. "nano", "pico", "mini" etc) is necessary - to serve as "programmer" itself.
 
-This project allows sending Intel HEX file of compiled 8051 code over UART to Arduino, which further uploads it via SPI to
-attached AT89S4051. Probably also should work for AT89S52.
+This project allows directly sending Intel HEX file of compiled 8051 code over `UART` to `Arduino`, which further uploads it via `SPI` to
+attached target device. Tested with At89s52 and At89s4051 - they are from slightly different families, so other chips from these families
+should work. Note that chips with "c" index after "89" do not have SPI programming mode though.
 
 ### Wiring
 
@@ -13,9 +14,14 @@ attached AT89S4051. Probably also should work for AT89S52.
 - pin 11 - to target MISO (18)
 - pin 12 - to target CLK (19)
 
-Attach VCC and GND to target (20 and 10 respectively), plug in quartz between 4 and 5. Optionally P1.0, P1.1 could be
-pulled up with external resistors (others have internal pull-ups).
+Attach VCC and GND to target (including VPP if it is dedicated pin), plug in quartz between XTAL inputs. That's all.
 
 ### UART settings
 
 1200 Baud (to match firmware writing speed), no parity, single stop bit.
+
+### Extra
+
+Besides writing HEX file to device, the option to read program memory is also provided. Just replace colons (`:`) in your hex-file
+with question marks - and you'll read data instead of writing (data in hex-file themselves are not used, except for addresses in the
+beginning of the lines).
