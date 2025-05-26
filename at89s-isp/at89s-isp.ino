@@ -1,7 +1,6 @@
 unsigned char linebuf[128];
-unsigned char page[32];
 
-#define PIN_RESET 13
+#define PIN_RESET 9
 #define PIN_MOSI 10
 #define PIN_MISO 11
 #define PIN_SCK 12
@@ -30,14 +29,16 @@ int xchbyte(int v) {
   int mask = 0x80;
   int res = 0;
   while (mask) {
-    digitalWrite(PIN_SCK, HIGH);
     digitalWrite(PIN_MOSI, (v & mask) ? HIGH : LOW);
     delayMicroseconds(SPI_DELAY);
-    digitalWrite(PIN_SCK, LOW);
+    digitalWrite(PIN_SCK, HIGH);
+    delayMicroseconds(SPI_DELAY);
     res <<= 1;
     if (digitalRead(PIN_MISO) == HIGH) {
       res |= 1;
     }
+    digitalWrite(PIN_SCK, LOW);
+    delayMicroseconds(SPI_DELAY);
     mask >>= 1;
     delayMicroseconds(SPI_DELAY);
   }
@@ -51,12 +52,23 @@ int xch4bytes(int cmd, int p1, int p2, int v) {
   return xchbyte(v);
 }
 
-void prgEnable() {
-  xch4bytes(0b10101100, 0b01010011, 0, 0);
+int prgEnable() {
+  return xch4bytes(0b10101100, 0b01010011, 0, 0);
 }
 
-int readSignature() {
-  return xch4bytes(0b00101000, 0, 0, 0);
+long readSignature() {
+  int b0 = xch4bytes(0b00101000, 0, 0, 0);
+  if (b0 != 0x1E)
+    return 0x0BEDA000 | b0;
+  int b1 = xch4bytes(0b00101000, 0, 1, 0);
+  int b2;
+  if (b1 != 0x23 && b1 != 0x43) {
+    b1 = xch4bytes(0b00101000, 1, 0, 0);
+    b2 = xch4bytes(0b00101000, 2, 0, 0);
+  } else {
+    b2 = xch4bytes(0b00101000, 0, 2, 0);
+  }
+  return ((long) b0) << 16 | (b1 << 8) | b2;
 }
 
 void eraseChip() {
@@ -64,8 +76,12 @@ void eraseChip() {
 }
 
 void writeByte(int addr, int b) {
-  xch4bytes(0b01000000, addr >> 8, addr & 0xFF, b);
-  delay(3);
+  xch4bytes(0b01000000, (addr >> 8) & 0xFF, addr & 0xFF, b);
+  delay(5);
+}
+
+int readByte(int addr) {
+  return xch4bytes(0b00100000, (addr >> 8) & 0xFF, addr & 0xFF, 0);
 }
 
 void dbg(char* s) {
@@ -117,85 +133,54 @@ int byteAt(int i) {
   return (hex(linebuf[i]) << 4) | hex(linebuf[i + 1]);
 }
 
-void pageClean() {
-  for (int i = 0; i < sizeof(page); i++) {
-    page[i] = 0xFF;
-  }
+void writeHexLine(int sz, int addr) {
+    Serial.print("W@ 0x");
+    Serial.print(addr, HEX);
+    Serial.print(" ");
+    Serial.print(sz);
+    Serial.print(" b:");
+    for (int i = 0; i < sz; i++) {
+      int v = byteAt(4 + i);
+      writeByte(addr + i, v);
+      delayMicroseconds(500);
+      Serial.print(".");
+    }
+    Serial.println(" ok");
 }
 
-void writePage(int pg) {
-  Serial.print("Page ");
-  Serial.print(pg);
-  Serial.print(" ");
-  xchbyte(0b01010000);
-  xchbyte(pg >> 3);
-  xchbyte((pg & 0x1F) << 5);
-  for (int i = 0; i < sizeof(page); i++) {
-    xchbyte(page[i]);
-  }
-  delay(5);
-  xchbyte(0b00110000);
-  xchbyte(pg >> 3);
-  xchbyte((pg & 0x1F) << 5);
-  int ok = 0;
-  for (int i = 0; i < sizeof(page); i++) {
-    int v = xchbyte(0);
-    if (v == page[i]) {
-      ok += 1;
+void readHexLine(int sz, int addr) {
+    Serial.print("Verify at ");
+    Serial.print(addr, HEX);
+    Serial.print(":");
+    for (int i = 0; i < sz; i++) {
+      Serial.print(" ");
+      Serial.print(readByte(addr + i), HEX);
     }
-  }
-  if (ok == sizeof(page)) {
-    Serial.println("--== OK ==--");
-  } else {
-    Serial.print(ok);
-    Serial.println(" *** FAIL ***");
-  }
+    Serial.println();
 }
 
 int process(void) {
   int pg, prevPg = -1;
   int offs;
-  pageClean();
   while (1) {
     readLine();
     int sz = byteAt(0);
     int addr = (byteAt(1) << 8) + byteAt(2);
     int flag = byteAt(3);
-    dbg1("Size", sz);
-    dbg1("Addr", addr);
-    dbg1("Flag", flag);
     if (flag != 0) {
       break;
     }
-    pg = addr / sizeof(page);
-    if (prevPg != -1 && prevPg != pg) {
-      writePage(prevPg);
-      pageClean();
-      prevPg = -1;
-    }
-    offs = addr % sizeof(page);
-    for (int i = 0; i < sz; i++) {
-      prevPg = pg;
-      page[offs] = byteAt(i + 4);
-      offs += 1;
-      if (offs >= sizeof(page)) {
-        writePage(prevPg);
-        pageClean();
-        prevPg = -1;
-        pg += 1;
-        offs = 0;
-      }
-    }
-  }
-  if (prevPg != -1) {
-    writePage(prevPg);
-    pageClean();
+    if (linebuf[0] == ':')
+      writeHexLine(sz, addr);
+    else if (linebuf[0] == '?')
+      readHexLine(sz, addr);
   }
 }
 
 void loop() {
   delay(100);
-  if (Serial.peek() < 0) {
+  int firstChar = Serial.peek();
+  if (firstChar < 0) {
     return;
   }
   pinMode(PIN_SCK, OUTPUT);
@@ -204,23 +189,29 @@ void loop() {
   digitalWrite(PIN_RESET, HIGH);
   delay(4);
   pinMode(PIN_MOSI, OUTPUT);
-  Serial.println("PRG EN");
-  prgEnable();
-  int sig = readSignature();
+  Serial.print("PRG EN: ");
+  int pe = prgEnable();
+  Serial.println(pe, HEX);
   Serial.print("SIG=");
-  Serial.println(sig);
-  Serial.println("ERASE");
-  eraseChip();
-  delay(10);
-  process();
-  delay(10);
+  Serial.println(readSignature(), HEX);
+  if (firstChar == '!') {
+    Serial.println("ERASE");
+    eraseChip();
+    delay(500);
+  } else {
+    process();
+    delay(10);
+  }
   digitalWrite(PIN_RESET, LOW);
   pinMode(PIN_SCK, INPUT);
   pinMode(PIN_MOSI, INPUT);
+  Serial.println("Prg mode off");
   delay(100);
   digitalWrite(PIN_RESET, HIGH);
+  Serial.println("Activating reset (high)");
   delay(100);
   digitalWrite(PIN_RESET, LOW);
+  Serial.println("...deactivating (low)");
   Serial.println("DONE");
   while (Serial.peek() >= 0) {
     Serial.read();
